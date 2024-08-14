@@ -143,21 +143,27 @@ def create_selection_gui():
 
 def open_dso_selector():
     
+    entries_per_page = 500
+    
     def load_data(json_file):
         with open(json_file, 'r') as file:
             data = json.load(file)
         return data
     
-    def populate_treeview(tree, data, sort_key = None):
+    def safe_sort_key(value):
+        return (value is None, value)
+
+    def populate_treeview(tree, data, page_num = 1):
         #Clear existing data in the treeview
         for row in tree.get_children():
             tree.delete(row)
-
-        if sort_key:
-            dat = sorted(data, key = lambda x: x[sort_key])
+        
+        start_idx = (page_num  - 1) * entries_per_page
+        end_idx = min(start_idx + entries_per_page, len(data))
 
         #Populate treeview with sorted data
-        for index, item in enumerate(data):
+        for index in range(start_idx, end_idx):
+            item = data[index]
             values = [item[key] for key in item.keys()]
             tree.insert("", "end", text = index, value = values)
 
@@ -171,24 +177,78 @@ def open_dso_selector():
                     max_width = col_width
             tree.column(col, width = max_width)
 
-    def on_sort_column(tree, col, reverse):
+    def on_sort_column(tree, col, reverse, data, current_page, page_num_label):
         #Sort the data and update the treeview
-        sorted_data = sorted(tree_data, key = lambda x: x[col], reverse = reverse)
-        populate_treeview(tree, sorted_data)
-        tree.heading(col, command = lambda _col = col: on_sort_column(tree, _col, not reverse))
+        sorted_data = sorted(data, key = lambda x: safe_sort_key(x[col]), reverse = reverse)
+        
+        global tree_data
+        tree_data = sorted_data
+
+        current_page.set(1)
+        update_page(tree, tree_data, page_num_label, current_page.get())
+
+        tree.heading(col, command = lambda _col = col: on_sort_column(tree, _col, not reverse, tree_data, current_page, page_num_label))
+
+    def update_page(tree, data, page_num_label, page_num):
+        populate_treeview(tree, data, page_num=page_num)
+        page_num_label.config(text = f"Page {page_num}/{m.ceil(len(data) / entries_per_page)}")
 
     def create_gui():
+        
         global tree_data
-
         dso_json_file = os.path.join(root_path, "Support Files\\deep-sky-objects.json")
 
         #Load data from JSON File
         tree_data  = load_data(dso_json_file)
-        tree_data = tree_data
+        organized_data = {}
+
+        for index, item in enumerate(tree_data):
+            ra = round(item['ra'],8)
+            dec = round(item['dec'],8)
+            obj_type = item['type']
+            if item['name'] is not None:
+                name = item['name']
+            else:
+                name = ""
+
+            if item['r1'] is None and item['r2'] is None:
+                ang_size = item['r1']
+            elif item['r2'] is None:
+                ang_size = round(item['r1'],4)
+            elif item['r1'] is not None and item['r2'] is not None:
+                ang_size = round(max(item['r1'], item['r2']),4)
+            
+            if item['id1'] is not None and item['cat1'] is not None:
+                cat_id1 = str(item['cat1']) + str(item['id1'])
+            elif item['id1'] is None and item['cat1'] is not None:
+                cat_id1 = item['cat1']
+
+            if item['id2'] is not None and item['cat2'] is not None:
+                cat_id2 = str(item['cat2']) + str(item['id2'])
+            elif item['id2'] is None and item['cat2'] is not None:
+                cat_id2 = item['cat2']
+
+            organized_data[index] = {
+                'Right Ascension': ra,
+                'Declination':dec,
+                'Object Type':obj_type,
+                'Object Name':name,
+                'Angular Size':ang_size,
+                'Catalog 1':cat_id1,
+                'Catalog 2':cat_id2
+            }
+
+        tree_data = organized_data
+            
 
         #Initialize the main window
         root = tk.Tk()
         root.title("DSO Selector")
+
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+
+        root.geometry(f"{screen_width}x{screen_height}")
 
         # Create a frame to hold the Treeview
         frame = tk.Frame(root)
@@ -214,10 +274,34 @@ def open_dso_selector():
 
         # Define headings and add sorting functionality
         for col in columns:
-            tree.heading(col, text=col, command=lambda _col=col: on_sort_column(tree, _col, False))
+            tree.heading(col, text=col, command=lambda _col=col: on_sort_column(tree, _col, False, tree_data, current_page, page_num_label))
+
+        #Pagination controls
+        pagination_frame = tk.Frame(root)
+        pagination_frame.pack()
+
+        prev_button = tk.Button(pagination_frame, text = "Previous", command = lambda: update_page(tree, tree_data, page_num_label, max(1, current_page.get() - 1)))
+        next_button = tk.Button(pagination_frame, text = "Next", command = lambda: update_page(tree, tree_data, page_num_label, min(current_page.get() + 1, m.ceil(len(tree_data)/entries_per_page))))
+        prev_button.pack(side = "left")
+        next_button.pack(side = "right")
+
+        current_page = tk.IntVar(value = 1)
+        page_num_label = tk.Label(pagination_frame, text = f"Page 1/{m.ceil(len(tree_data) / entries_per_page)}")
+        page_num_label.pack(side = 'left', padx = 16)
 
         # Populate the treeview with data
-        populate_treeview(tree, tree_data)
+        populate_treeview(tree, tree_data, current_page.get())
+
+        def on_next():
+            current_page.set(min(current_page.get() + 1, m.ceil(len(tree_data) / entries_per_page)))
+            update_page(tree, tree_data, page_num_label, current_page.get())
+
+        def on_prev():
+            current_page.set(max(current_page.get() - 1, 1))
+            update_page(tree, tree_data, page_num_label, current_page.get())
+
+        next_button.config(command = on_next)
+        prev_button.config(command = on_prev)
 
         # Start the Tkinter event loop
         root.mainloop()
@@ -255,15 +339,6 @@ create_selection_gui()
 
 
 
-
-###TEMP AREA FOR CODE UNTIL I KNOW WHERE IT'LL GO
-
-#Path to reference files
-dso_Catalog_Path = "Support Files\\deep-sky-objects.json"
-
-#Import DSO Catalog 
-with open(dso_Catalog_Path) as jsonData:
-    dso_All_Data = json.load(jsonData)
 
 
 def getIcrsVector(lat,long, height, time):

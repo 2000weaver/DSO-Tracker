@@ -143,14 +143,18 @@ def create_selection_gui():
 
 def open_dso_selector():
     
-    entries_per_page = 500
+    entries_per_page = 200
     
     def load_data(json_file):
         with open(json_file, 'r') as file:
             data = json.load(file)
         return data
     
-    def safe_sort_key(value):
+    def safe_sort_key(item, key):
+        if isinstance(item, dict):
+            value = item.get(key,None)
+        else:
+            value = item
         return (value is None, value)
 
     def populate_treeview(tree, data, page_num = 1):
@@ -164,7 +168,7 @@ def open_dso_selector():
         #Populate treeview with sorted data
         for index in range(start_idx, end_idx):
             item = data[index]
-            values = [item[key] for key in item.keys()]
+            values = [item.get(key,"") if isinstance(item, dict) else item for key in tree["columns"]]
             tree.insert("", "end", text = index, value = values)
 
         #Adjust column width to fit the content
@@ -179,7 +183,7 @@ def open_dso_selector():
 
     def on_sort_column(tree, col, reverse, data, current_page, page_num_label):
         #Sort the data and update the treeview
-        sorted_data = sorted(data, key = lambda x: safe_sort_key(x[col]), reverse = reverse)
+        sorted_data = sorted(data, key = lambda x: safe_sort_key(x, col), reverse = reverse)
         
         global tree_data
         tree_data = sorted_data
@@ -200,12 +204,13 @@ def open_dso_selector():
 
         #Load data from JSON File
         tree_data  = load_data(dso_json_file)
-        organized_data = {}
+        organized_data = []
 
         for index, item in enumerate(tree_data):
             ra = round(item['ra'],8)
             dec = round(item['dec'],8)
             obj_type = item['type']
+            mag = item['mag']
             if item['name'] is not None:
                 name = item['name']
             else:
@@ -228,15 +233,16 @@ def open_dso_selector():
             elif item['id2'] is None and item['cat2'] is not None:
                 cat_id2 = item['cat2']
 
-            organized_data[index] = {
+            organized_data.append({
                 'Right Ascension': ra,
                 'Declination':dec,
                 'Object Type':obj_type,
+                'Magnitude':mag,
                 'Object Name':name,
                 'Angular Size':ang_size,
                 'Catalog 1':cat_id1,
                 'Catalog 2':cat_id2
-            }
+            })
 
         tree_data = organized_data
             
